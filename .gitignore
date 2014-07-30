@@ -1,0 +1,14 @@
+*.pyc
+*.pyo
+*~
+\#*#
+build/
+dist/
+*.egg-info/
+src/
+.vagrant
+
+.DS_Store
+.idea
+
+*.sqlite3

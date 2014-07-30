@@ -1,0 +1,82 @@
+[
+{
+    "pk": 1, 
+    "model": "local.relatedmodel", 
+    "fields": {
+        "char_field": "foo"
+    }
+},
+{
+    "pk": 1, 
+    "model": "local.relatedmodelwithslug", 
+    "fields": {
+        "slug_field": "bar", 
+        "char_field": "baz"
+    }
+},
+{
+    "pk": 1, 
+    "model": "local.m2mrelatedmodel", 
+    "fields": {
+        "char_field": "foo"
+    }
+},
+{
+    "pk": 2, 
+    "model": "local.m2mrelatedmodel", 
+    "fields": {
+        "char_field": "bar"
+    }
+},
+{
+    "pk": 1, 
+    "model": "local.m2mrelatedmodelwithslug", 
+    "fields": {
+        "slug_field": "fooslug", 
+        "char_field": "foo"
+    }
+},
+{
+    "pk": 2, 
+    "model": "local.m2mrelatedmodelwithslug", 
+    "fields": {
+        "slug_field": "barslug", 
+        "char_field": "bar"
+    }
+},
+{
+    "pk": 1, 
+    "model": "local.testmodel", 
+    "fields": {
+        "int_field": 5, 
+        "fk_slug_field": 1, 
+        "char_field": "foo", 
+        "datetime_field": "2014-07-29T16:51:42.997Z", 
+        "m2m_slug_field": [
+            1, 
+            2
+        ], 
+        "fk_field": 1, 
+        "m2m_field": [
+            1, 
+            2
+        ]
+    }
+},
+{
+    "pk": 1, 
+    "model": "local.reverserelationmodel", 
+    "fields": {
+        "fk_field": 1
+    }
+},
+{
+    "pk": 1, 
+    "model": "local.reversem2mrelationmodel", 
+    "fields": {
+        "m2m_field": [
+            1
+        ]
+    }
+}
+]
