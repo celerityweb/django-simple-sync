@@ -7,7 +7,10 @@ logger = logging.getLogger(__name__)
 
 import json
 
-from celery.app import task
+try:
+    from celery import shared_task as task
+except ImportError:
+    from celery import task
 from django.db import models, Error as DatabaseError
 try:
     from django.db.transaction import atomic

@@ -6,3 +6,9 @@ import logging
 logger = logging.getLogger(__name__)
 
 __version__ = '0.1'
+
+from .models import ModelSyncer, __registry__
+
+def register(model, cls=ModelSyncer):
+    __registry__.register(model, cls)
+

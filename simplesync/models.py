@@ -7,28 +7,17 @@ logger = logging.getLogger(__name__)
 
 import json
 
-from django.db import models, signals
+from django.db import models
+from django.db.models import signals
 from django.core.serializers.json import DateTimeAwareJSONEncoder
 
 from . import tasks
 
-__models_registered__ = set()
 
 class ModelSyncer(object):
 
     def __init__(self, model):
         self.model = model
-
-    @classmethod
-    def register(cls, model):
-        if model in __models_registered__:
-            logger.info('Model %s is already registered for syncing',
-                        model._meta.model_name)
-            return
-        self = cls(model)
-        signals.post_save.connect(self.post_save_handler, sender=model)
-        signals.post_delete.connect(self.post_delete_handler, sender=model)
-        __models_registered__.add(model)
 
     def post_save_handler(self, sender=None, instance=None, created=None,
                           raw=None, using=None, update_fields=None, **kwargs):
@@ -227,3 +216,19 @@ class ModelSyncer(object):
                 setattr(obj, field.attname, value)
         return obj, m2m_values
 
+class SyncerRegistry(object):
+    def __init__(self):
+        self.registered = {}
+
+    def register(self, model, cls):
+        if model in self.registered:
+            logger.info('Model %s is already registered for syncing',
+                        model._meta.model_name)
+            return
+        instance = cls(model)
+        signals.post_save.connect(instance.post_save_handler, sender=model)
+        signals.post_delete.connect(instance.post_delete_handler,
+                                    sender=model)
+        self.registered[model] = instance
+
+__registry__ = SyncerRegistry()
