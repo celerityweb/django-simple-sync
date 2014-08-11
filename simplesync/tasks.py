@@ -26,7 +26,8 @@ def do_sync(operation, app_label, model_name, json_str):
     model_cls = models.get_model(app_label, model_name)
     json_obj = json.loads(json_str)
     if operation == 'delete':
-        model_cls.objects.filter(**json_obj).delete()
+        with atomic():
+            model_cls.objects.filter(**json_obj).delete()
         return
     from .models import ModelSyncer
     syncer = ModelSyncer(model_cls)
@@ -41,12 +42,13 @@ def do_sync(operation, app_label, model_name, json_str):
                     setattr(new_obj, attr, value_list)
                 new_obj.save(force_update=True)
         except DatabaseError, e:
+            logger.exception('Database error')
             do_sync.retry(exc=e)
     elif operation == 'update':
         updated_obj, m2m_data = syncer.from_json(json_obj)
         slug_field = syncer.find_slug_field(model_cls)
         try:
-            with atomic:
+            with atomic():
                 if slug_field:
                     # If we're tracking slug, PK shouldn't be part of the update
                     del updated_obj[model_cls._meta.pk.attrname]
@@ -61,6 +63,7 @@ def do_sync(operation, app_label, model_name, json_str):
                 obj.save(force_update=True)
         except DatabaseError, e:
             do_sync.retry(exc=e)
+            logger.exception('Database error')
 
 
 
