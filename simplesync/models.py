@@ -11,9 +11,6 @@ from django.db import models
 from django.db.models import signals
 from django.core.serializers.json import DateTimeAwareJSONEncoder
 
-from . import tasks
-
-
 class ModelSyncer(object):
 
     def __init__(self, model):
@@ -21,6 +18,7 @@ class ModelSyncer(object):
 
     def post_save_handler(self, sender=None, instance=None, created=None,
                           raw=None, using=None, update_fields=None, **kwargs):
+        from . import tasks
         if raw:
             logger.warning('Received "raw" save request for %s %s - declining '
                            'to operate', sender._meta.model_name, instance.pk)
@@ -58,6 +56,7 @@ class ModelSyncer(object):
 
     def post_delete_handler(self, sender=None, instance=None, using=None,
                             **kwargs):
+        from . import tasks
         if not self.can_delete(instance):
             logger.debug('Received delete signal for %s %s - but not '
                          'authorized by can_delete',
