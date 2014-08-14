@@ -104,3 +104,5 @@ LOGGING = {
         'level': 'DEBUG'
     }
 }
+
+DO_SYNC = True

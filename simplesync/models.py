@@ -62,24 +62,106 @@ class ModelSyncer(object):
                          'authorized by can_delete',
                          sender._meta.model_name, instance.pk)
             return
-        slug_field = self.find_slug_field(sender)
-        if slug_field:
-            attname = slug_field.attname
-            value = getattr(instance, slug_field.attname)
+        if hasattr(sender, 'natural_key') and \
+                hasattr(sender._default_manager, 'get_by_natural_key'):
+            json_body = {'pk': sender.natural_key()}
         else:
-            attname = 'pk'
-            value = instance.pk
+            slug_field = self.find_slug_field(sender)
+            if slug_field:
+                attname = slug_field.attname
+                value = getattr(instance, slug_field.attname)
+            else:
+                attname = 'pk'
+                value = instance.pk
+            json_body = {attname: value}
         result = tasks.do_sync.delay(
             'delete', sender._meta.app_label, sender._meta.model_name,
-            json.dumps({attname: value}))
+            json.dumps(json_body))
         logger.info('DELETE - %s %s - queued as %s',
-                    sender._meta.model_name, value, result.id)
+                    sender._meta.model_name, json_body, result.id)
+
+    def m2m_changed_handler(self, sender=None, instance=None, action=None,
+                            reverse=None, model=None, pk_set=None,
+                            using=None, **kwargs):
+        if model != self.model:
+            return
+        from . import tasks
+        if action == 'post_add' and self.can_add_m2m(type(instance), model):
+            # Treat this like a create
+            for pk in pk_set:
+                ThroughClass = sender
+                obj = ThroughClass.objects.get(
+                    **{type(instance)._meta.model_name: instance,
+                       model._meta.model_name: pk}
+                )
+                # We need a JSON generator with this model now...
+                syncer = type(self)(ThroughClass)
+                result = tasks.do_sync.delay('create',
+                                             sender._meta.app_label,
+                                             sender._meta.model_name,
+                                             json.dumps(
+                                                 syncer.to_json(obj),
+                                                 cls=DateTimeAwareJSONEncoder))
+                logger.info('CREATE - %s %s - queued as %s',
+                            sender._meta.model_name, instance.pk, result.id)
+            return
+        if action == 'post_remove' and \
+                self.can_remove_m2m(type(instance), model):
+            for pk in pk_set:
+                json_body = {}
+                other_instance = model.objects.get(pk=pk)
+                for obj in [instance, other_instance]:
+                    if hasattr(type(obj), 'natural_key') and \
+                            hasattr(type(obj)._default_manager,
+                                    'get_by_natural_key'):
+                        json_body[type(obj)._meta.model_name] = obj.natural_key()
+                    else:
+                        slug_field = self.find_slug_field(type(obj))
+                        if slug_field:
+                            attname = slug_field.attname
+                            value = getattr(obj, slug_field.attname)
+                        else:
+                            attname = 'pk'
+                            value = obj.pk
+                        json_body['%s__%s' % (type(obj)._meta.model_name,
+                                              attname)] = value
+            result = tasks.do_sync.delay(
+                'delete', sender._meta.app_label, sender._meta.model_name,
+                json.dumps(json_body))
+            logger.info('DELETE - %s %s - queued as %s',
+                        sender._meta.model_name, json_body, result.id)
+        if action == 'post_clear' and \
+                self.can_remove_m2m(type(instance), model):
+            if hasattr(type(instance), 'natural_key') and \
+                    hasattr(type(instance)._default_manager,
+                            'get_by_natural_key'):
+                json_body[type(instance)._meta.model_name] = instance.natural_key()
+            else:
+                slug_field = self.find_slug_field(type(instance))
+                if slug_field:
+                    attname = slug_field.attname
+                    value = getattr(instance, slug_field.attname)
+                else:
+                    attname = 'pk'
+                    value = instance.pk
+                json_body = {attname: value}
+            result = tasks.do_sync.delay(
+                'delete', sender._meta.app_label, sender._meta.model_name,
+                json.dumps(json_body))
+            logger.info('DELETE - %s %s - queued as %s',
+                        sender._meta.model_name, json_body, result.id)
+
+    def can_add_m2m(self, model, other_model):
+        return is_registered(model) and is_registered(other_model)
+
+    def can_remove_m2m(self, model, other_model):
+        return is_registered(model) and is_registered(other_model)
 
     def can_create(self, obj):
         return True
 
     def can_update(self, obj):
-        return False
+        return True
 
     def can_delete(self, obj):
         return True
@@ -99,12 +181,22 @@ class ModelSyncer(object):
             # numeric ID
             if field.rel:
                 rel_obj = getattr(obj, field.name)
-                rel_obj_slug_field = self.find_slug_field(field.rel.to)
-                if rel_obj_slug_field:
-                    json_obj[field.attname] = getattr(
-                        rel_obj, rel_obj_slug_field.attname)
+                if hasattr(type(rel_obj)._default_manager,
+                           'get_by_natural_key') and \
+                        hasattr(rel_obj, 'natural_key'):
+                    json_obj[field.attname] = rel_obj.natural_key()
                 else:
-                    json_obj[field.attname] = getattr(obj, field.attname)
+                    rel_obj_slug_field = self.find_slug_field(field.rel.to)
+                    if rel_obj_slug_field:
+                        json_obj[field.attname] = getattr(
+                            rel_obj, rel_obj_slug_field.attname)
+                    else:
+                        json_obj[field.attname] = getattr(obj, field.attname)
+            elif field.primary_key and \
+                    hasattr(self.model._default_manager,
+                            'get_by_natural_key') and \
+                    hasattr(self.model, 'natural_key'):
+                json_obj['pk'] = obj.natural_key()
             else:
                 json_obj[field.attname] = getattr(obj, field.attname)
 
@@ -112,18 +204,36 @@ class ModelSyncer(object):
         for field in self.model._meta.many_to_many:
             rel_mgr = getattr(obj, field.name)
             rel_model = field.rel.to
-            rel_obj_slug_field = self.find_slug_field(rel_model)
-            if rel_obj_slug_field:
-                json_obj[field.attname] = [
-                    getattr(rel_obj, rel_obj_slug_field.attname)
-                    for rel_obj in rel_mgr.all()]
+            if hasattr(rel_model._default_manager, 'get_by_natural_key') and \
+                    hasattr(rel_model, 'natural_key'):
+                json_obj[field.attname] = [rel_obj.natural_key()
+                                           for rel_obj in rel_mgr.all()]
             else:
-                json_obj[field.attname] = [
-                    rel_obj.pk for rel_obj in rel_mgr.all()]
+                rel_obj_slug_field = self.find_slug_field(rel_model)
+                if rel_obj_slug_field:
+                    json_obj[field.attname] = [
+                        getattr(rel_obj, rel_obj_slug_field.attname)
+                        for rel_obj in rel_mgr.all()]
+                else:
+                    json_obj[field.attname] = [
+                        rel_obj.pk for rel_obj in rel_mgr.all()]
 
         return json_obj
 
     def __decode_rel_value__(self, obj, field, value):
+        if hasattr(value, '__iter__') and \
+                hasattr(field.rel.to._default_manager,
+                        'get_by_natural_key') and \
+                hasattr(field.rel.to, 'natural_key'):
+            # I'll bet you can guess this is a natural key.
+            try:
+                rel_obj = field.rel.to._default_manager.get_by_natural_key(
+                    *value)
+            except field.rel.to.DoesNotExist:
+                return None
+            else:
+                return rel_obj
+
         if isinstance(value, (int, long)):
             # This is the primary key of the related object.
             try:
@@ -134,39 +244,37 @@ class ModelSyncer(object):
                 return None
             else:
                 return rel_obj
-        else:
-            # This is probably a slug.
-            rel_obj_slug_field = self.find_slug_field(field.rel.to)
-            if rel_obj_slug_field:
-                try:
-                    rel_obj = field.rel.to.objects.get(
-                        **{rel_obj_slug_field.attname: value}
-                    )
-                except field.rel.to.DoesNotExist:
-                    logger.warning('Could not find related %s object '
-                                   'with a %s slug of %s',
-                                   field.rel.to._meta.model_name,
-                                   rel_obj_slug_field, value)
-                    return None
-                else:
-                    return rel_obj
+        # This is probably a slug.
+        rel_obj_slug_field = self.find_slug_field(field.rel.to)
+        if rel_obj_slug_field:
+            try:
+                rel_obj = field.rel.to.objects.get(
+                    **{rel_obj_slug_field.attname: value}
+                )
+            except field.rel.to.DoesNotExist:
+                logger.warning('Could not find related %s object '
+                               'with a %s slug of %s',
+                               field.rel.to._meta.model_name,
+                               rel_obj_slug_field, value)
+                return None
             else:
-                # Uh. Maybe the other model has a CharField for a pk??
-                try:
-                    rel_obj = field.rel.to.objects.get(pk=value)
-                except ValueError:
-                    # Nope.
-                    logger.warning('Got a non-integer value for '
-                                   'related field %s to %s but did not '
-                                   'find a slug field and the primary '
-                                   'key is not a string type.',
-                                   field.attname,
-                                   field.rel.to._meta.model_name)
-                    return None
-                else:
-                    # Sure. Why not.
-                    return rel_obj
+                return rel_obj
 
+        # Uh. Maybe the other model has a CharField for a pk??
+        try:
+            rel_obj = field.rel.to.objects.get(pk=value)
+        except ValueError:
+            # Nope.
+            logger.warning('Got a non-integer value for '
+                           'related field %s to %s but did not '
+                           'find a slug field and the primary '
+                           'key is not a string type.',
+                           field.attname,
+                           field.rel.to._meta.model_name)
+            return None
+        else:
+            # Sure. Why not.
+            return rel_obj
 
     def from_json(self, json_obj):
         obj = self.model()
@@ -182,6 +290,8 @@ class ModelSyncer(object):
                         logger.warning('Could not find field on model for JSON '
                                        'object key %s', field_name)
                         continue
+                elif field_name == 'pk':
+                    field = self.model._meta.pk
                 else:
                     logger.warning('Could not find field on model for JSON '
                                    'object key %s', field_name)
@@ -211,6 +321,14 @@ class ModelSyncer(object):
                                                               field,
                                                               value),
                                     'pk', None))
+            elif field.primary_key and \
+                    hasattr(self.model._default_manager,
+                            'get_by_natural_key') and \
+                    hasattr(self.model, 'natural_key'):
+                try:
+                    obj.pk = self.model._default_manager.get_by_natural_key(*value)
+                except self.model.DoesNotExist:
+                    obj.pk = None
             else:
                 setattr(obj, field.attname, value)
         return obj, m2m_values
@@ -228,6 +346,8 @@ class SyncerRegistry(object):
         signals.post_save.connect(instance.post_save_handler, sender=model)
         signals.post_delete.connect(instance.post_delete_handler,
                                     sender=model)
+        signals.m2m_changed.connect(instance.m2m_changed_handler)
         self.registered[model] = instance
 
 __registry__ = SyncerRegistry()
+is_registered = lambda model_cls: model_cls in __registry__.registered

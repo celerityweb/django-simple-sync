@@ -1,7 +1,16 @@
 from django.db import models
 
+class CharFieldNaturalKeyManager(models.Manager):
+    def get_by_natural_key(self, char_field):
+        return self.get(char_field=char_field)
+
 class RelatedModel(models.Model):
-    char_field = models.CharField(max_length=20)
+    char_field = models.CharField(max_length=20, unique=True)
+
+    def natural_key(self):
+        return self.char_field,
+
+    objects = CharFieldNaturalKeyManager()
 
 class RelatedModelWithSlug(models.Model):
     slug_field = models.SlugField()
@@ -10,9 +19,18 @@ class RelatedModelWithSlug(models.Model):
 class M2MRelatedModel(models.Model):
     char_field = models.CharField(max_length=20)
 
+class SlugFieldNaturalKeyManager(models.Manager):
+    def get_by_natural_key(self, slug_field):
+        return self.get(slug_field=slug_field)
+
 class M2MRelatedModelWithSlug(models.Model):
-    slug_field = models.SlugField()
+    slug_field = models.SlugField(unique=True)
     char_field = models.CharField(max_length=20)
+
+    def natural_key(self):
+        return self.slug_field,
+
+    objects = SlugFieldNaturalKeyManager()
 
 class TestModel(models.Model):
     char_field = models.CharField(max_length=20)
@@ -28,3 +46,13 @@ class ReverseRelationModel(models.Model):
 
 class ReverseM2MRelationModel(models.Model):
     m2m_field = models.ManyToManyField(TestModel)
+
+from simplesync import register
+from django.conf import settings
+
+if settings.DO_SYNC:
+    register(RelatedModel)
+    register(RelatedModelWithSlug)
+    register(M2MRelatedModel)
+    register(M2MRelatedModelWithSlug)
+    register(TestModel)
