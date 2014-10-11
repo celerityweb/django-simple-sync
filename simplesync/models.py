@@ -9,6 +9,7 @@ import json
 
 from django.db import models
 from django.db.models import signals
+from django.core.serializers import serialize, deserialize
 from django.core.serializers.json import DateTimeAwareJSONEncoder
 
 class ModelSyncer(object):
@@ -32,9 +33,7 @@ class ModelSyncer(object):
             result = tasks.do_sync.delay('create',
                                          sender._meta.app_label,
                                          sender._meta.model_name,
-                                         json.dumps(
-                                             self.to_json(instance),
-                                             cls=DateTimeAwareJSONEncoder))
+                                         self.to_json(instance))
             logger.info('CREATE - %s %s - queued as %s',
                         sender._meta.model_name, instance.pk, result.id)
             return
@@ -47,9 +46,7 @@ class ModelSyncer(object):
             result = tasks.do_sync.delay('update',
                                          sender._meta.app_label,
                                          sender._meta.model_name,
-                                         json.dumps(
-                                             self.to_json(instance),
-                                             cls=DateTimeAwareJSONEncoder))
+                                         self.to_json(instance))
             logger.info('UPDATE - %s %s - queued as %s',
                         sender._meta.model_name, instance.pk, result.id)
             return
@@ -66,13 +63,8 @@ class ModelSyncer(object):
                 hasattr(sender._default_manager, 'get_by_natural_key'):
             json_body = {'pk': sender.natural_key()}
         else:
-            slug_field = self.find_slug_field(sender)
-            if slug_field:
-                attname = slug_field.attname
-                value = getattr(instance, slug_field.attname)
-            else:
-                attname = 'pk'
-                value = instance.pk
+            attname = 'pk'
+            value = instance.pk
             json_body = {attname: value}
         result = tasks.do_sync.delay(
             'delete', sender._meta.app_label, sender._meta.model_name,
@@ -99,9 +91,7 @@ class ModelSyncer(object):
                 result = tasks.do_sync.delay('create',
                                              sender._meta.app_label,
                                              sender._meta.model_name,
-                                             json.dumps(
-                                                 syncer.to_json(obj),
-                                                 cls=DateTimeAwareJSONEncoder))
+                                             syncer.to_json(obj))
                 logger.info('CREATE - %s %s - queued as %s',
                             sender._meta.model_name, instance.pk, result.id)
             return
@@ -116,18 +106,13 @@ class ModelSyncer(object):
                                     'get_by_natural_key'):
                         json_body[type(obj)._meta.model_name] = obj.natural_key()
                     else:
-                        slug_field = self.find_slug_field(type(obj))
-                        if slug_field:
-                            attname = slug_field.attname
-                            value = getattr(obj, slug_field.attname)
-                        else:
-                            attname = 'pk'
-                            value = obj.pk
+                        attname = 'pk'
+                        value = obj.pk
                         json_body['%s__%s' % (type(obj)._meta.model_name,
                                               attname)] = value
             result = tasks.do_sync.delay(
                 'delete', sender._meta.app_label, sender._meta.model_name,
-                json.dumps(json_body))
+                json.dumps(json_body, cls=DateTimeAwareJSONEncoder))
             logger.info('DELETE - %s %s - queued as %s',
                         sender._meta.model_name, json_body, result.id)
         if action == 'post_clear' and \
@@ -137,17 +122,12 @@ class ModelSyncer(object):
                             'get_by_natural_key'):
                 json_body[type(instance)._meta.model_name] = instance.natural_key()
             else:
-                slug_field = self.find_slug_field(type(instance))
-                if slug_field:
-                    attname = slug_field.attname
-                    value = getattr(instance, slug_field.attname)
-                else:
-                    attname = 'pk'
-                    value = instance.pk
+                attname = 'pk'
+                value = instance.pk
                 json_body = {attname: value}
             result = tasks.do_sync.delay(
                 'delete', sender._meta.app_label, sender._meta.model_name,
-                json.dumps(json_body))
+                json.dumps(json_body, cls=DateTimeAwareJSONEncoder))
             logger.info('DELETE - %s %s - queued as %s',
                         sender._meta.model_name, json_body, result.id)
 
@@ -166,15 +146,9 @@ class ModelSyncer(object):
     def can_delete(self, obj):
         return True
 
-    def find_slug_field(self, model):
-            slug_fields = [
-                f for f in model._meta.concrete_fields
-                if isinstance(f, models.SlugField)]
-            if slug_fields:
-                # The first among them is what we'll use
-                return slug_fields[0]
-
     def to_json(self, obj):
+        return serialize('json', [obj], use_natural_keys=True)[0]
+
         json_obj = {}
         for field in self.model._meta.concrete_fields:
             # if the related object has a SlugField, use that versus the
@@ -186,12 +160,7 @@ class ModelSyncer(object):
                         hasattr(rel_obj, 'natural_key'):
                     json_obj[field.attname] = rel_obj.natural_key()
                 else:
-                    rel_obj_slug_field = self.find_slug_field(field.rel.to)
-                    if rel_obj_slug_field:
-                        json_obj[field.attname] = getattr(
-                            rel_obj, rel_obj_slug_field.attname)
-                    else:
-                        json_obj[field.attname] = getattr(obj, field.attname)
+                    json_obj[field.attname] = getattr(obj, field.attname)
             elif field.primary_key and \
                     hasattr(self.model._default_manager,
                             'get_by_natural_key') and \
@@ -209,15 +178,8 @@ class ModelSyncer(object):
                 json_obj[field.attname] = [rel_obj.natural_key()
                                            for rel_obj in rel_mgr.all()]
             else:
-                rel_obj_slug_field = self.find_slug_field(rel_model)
-                if rel_obj_slug_field:
-                    json_obj[field.attname] = [
-                        getattr(rel_obj, rel_obj_slug_field.attname)
-                        for rel_obj in rel_mgr.all()]
-                else:
-                    json_obj[field.attname] = [
-                        rel_obj.pk for rel_obj in rel_mgr.all()]
-
+                json_obj[field.attname] = [
+                    rel_obj.pk for rel_obj in rel_mgr.all()]
         return json_obj
 
     def __decode_rel_value__(self, obj, field, value):
@@ -230,7 +192,8 @@ class ModelSyncer(object):
                 rel_obj = field.rel.to._default_manager.get_by_natural_key(
                     *value)
             except field.rel.to.DoesNotExist:
-                return None
+                logger.warning('Relation DNE: %s -> %s=%s', obj, field.rel.to, value)
+                raise
             else:
                 return rel_obj
 
@@ -239,24 +202,8 @@ class ModelSyncer(object):
             try:
                 rel_obj = field.rel.to.objects.get(pk=value)
             except field.rel.to.DoesNotExist:
-                logger.warning('Could not find a related %s object with a pk '
-                               'of %s', field.rel.to._meta.model_name, value)
-                return None
-            else:
-                return rel_obj
-        # This is probably a slug.
-        rel_obj_slug_field = self.find_slug_field(field.rel.to)
-        if rel_obj_slug_field:
-            try:
-                rel_obj = field.rel.to.objects.get(
-                    **{rel_obj_slug_field.attname: value}
-                )
-            except field.rel.to.DoesNotExist:
-                logger.warning('Could not find related %s object '
-                               'with a %s slug of %s',
-                               field.rel.to._meta.model_name,
-                               rel_obj_slug_field, value)
-                return None
+                logger.warning('Relation DNE: %s -> %s=%s', obj, field.rel.to, value)
+                raise
             else:
                 return rel_obj
 
@@ -266,17 +213,17 @@ class ModelSyncer(object):
         except ValueError:
             # Nope.
             logger.warning('Got a non-integer value for '
-                           'related field %s to %s but did not '
-                           'find a slug field and the primary '
+                           'related field %s to %s but the primary '
                            'key is not a string type.',
                            field.attname,
                            field.rel.to._meta.model_name)
-            return None
+            raise models.ObjectDoesNotExist
         else:
             # Sure. Why not.
             return rel_obj
 
     def from_json(self, json_obj):
+        return deserialize('json', [json_obj])
         obj = self.model()
         m2m_values = {}
         for field_name, value in json_obj.iteritems():

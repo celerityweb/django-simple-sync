@@ -21,12 +21,8 @@ from django.conf import settings
 
 NULLIFY_PK = getattr(settings, 'SIMPLESYNC_NULLIFY_PK', False)
 
-@task(name='simplesync-task', ignore_result=True)
+@task(name='simplesync-task', ignore_result=True, max_retries=5)
 def do_sync(operation, app_label, model_name, json_str):
-    if settings.DEBUG:
-        logger.debug('audit: %s: %s on %s.%s - %s', do_sync.request.id, operation,
-                     app_label, model_name, json_str)
-        connection.queries = []
     model_cls = models.get_model(app_label, model_name)
     json_obj = json.loads(json_str)
     if operation == 'delete':
@@ -47,6 +43,7 @@ def do_sync(operation, app_label, model_name, json_str):
                     obj = field.rel.to._default_manager.get_by_natural_key(*value)
                     json_obj[key] = obj.pk
             model_cls.objects.filter(**json_obj).delete()
+        return
     from .models import ModelSyncer
     syncer = ModelSyncer(model_cls)
     if operation == 'create':
@@ -56,31 +53,28 @@ def do_sync(operation, app_label, model_name, json_str):
         try:
             with atomic():
                 new_obj.save(force_insert=True)
-                for attr, value_list in m2m_data.items():
-                    if value_list:
-                        setattr(new_obj, attr, value_list)
+                # for attr, value_list in m2m_data.items():
+                #     if value_list:
+                #         setattr(new_obj, attr, value_list)
         except DatabaseError, e:
-            logger.exception('Database error')
+            logger.warning('Create failed (will retry): %s - %s', unicode(new_obj), e)
             do_sync.retry(exc=e)
-    elif operation == 'update':
+        return
+    if operation == 'update':
         updated_obj, m2m_data = syncer.from_json(json_obj)
-        slug_field = syncer.find_slug_field(model_cls)
         try:
             with atomic():
-                if slug_field:
-                    # If we're tracking slug, PK shouldn't be part of the update
-                    setattr(updated_obj, model_cls._meta.pk.attrname,
-                            model_cls.objects.get(
-                                **{slug_field.attname: getattr(updated_obj,
-                                                               slug_field.attname)}))
+                # If there's a natural key, get the object in the database
+                # matching this natural key and use its local pk value
+                if hasattr(updated_obj, 'natural_key') and callable(updated_obj.natural_key) \
+                        and hasattr(type(updated_obj)._default_manager, 'get_by_natural_key'):
+                    local_obj = type(updated_obj)._default_manager.get_by_natural_key(*updated_obj.natural_key())
+                    updated_obj.pk = local_obj.pk
+                # This shouldn't affect M2M relationships
                 updated_obj.save(force_update=True)
         except DatabaseError, e:
+            logger.warning('Update failed (will retry): %s - %s', unicode(updated_obj), e)
             do_sync.retry(exc=e)
-            logger.exception('Database error')
-    if settings.DEBUG:
-        for query in connection.queries:
-            logger.debug('audit: %s: %s', do_sync.request.id, query)
-        connection.queries = []
 
 
 
