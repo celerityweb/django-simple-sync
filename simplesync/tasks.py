@@ -63,7 +63,7 @@ def do_sync(operation, app_label, model_name, json_str):
             try:
                 logger.warning('Create failed: %s - %s', unicode(new_obj), e)
             except Exception, _:
-                logger.warning('Create failed: %s - %s', model_cls, e)
+                logger.warning('Create failed: %s - %s - %s', model_cls, json_str, e)
             try:
                 raise do_sync.retry(exc=e)
             except do_sync.MaxRetriesExceededError, e:
@@ -91,7 +91,7 @@ def do_sync(operation, app_label, model_name, json_str):
             try:
                 logger.warning('Update failed: %s - %s', unicode(updated_obj), e)
             except Exception, _:
-                logger.warning('Update failed: %s - %s', model_cls)
+                logger.warning('Update failed: %s - %s - %s', model_cls, json_str, e)
             try:
                 raise do_sync.retry(exc=e)
             except do_sync.MaxRetriesExceededError, e:
