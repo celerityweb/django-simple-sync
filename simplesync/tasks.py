@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 import json
 
 from celery import current_app
+from django.core.serializers.base import DeserializationError
 from django.db import models, Error as DatabaseError, connection
 try:
     from django.db.transaction import atomic
@@ -39,8 +40,11 @@ def do_sync(operation, app_label, model_name, json_str):
                         continue
                     obj = field.rel.to._default_manager.get_by_natural_key(*value)
                     json_obj[key] = obj.pk
-            model_cls.objects.filter(**json_obj).delete()
-        return
+            try:
+                model_cls.objects.filter(**json_obj).delete()
+            except TypeError:
+                logger.exception('%s', json_obj)
+        logger.info('DELETED - %s - %s', model_cls, json_obj)
     from .models import ModelSyncer
     syncer = ModelSyncer(model_cls)
     if operation == 'create':
@@ -53,13 +57,22 @@ def do_sync(operation, app_label, model_name, json_str):
                 # for attr, value_list in m2m_data.items():
                 #     if value_list:
                 #         setattr(new_obj, attr, value_list)
-        except DatabaseError, e:
-            logger.warning('Create failed: %s - %s', unicode(new_obj), e)
+        except (models.ObjectDoesNotExist,
+                DatabaseError,
+                DeserializationError), e:
+            try:
+                logger.warning('Create failed: %s - %s', unicode(new_obj), e)
+            except Exception, _:
+                logger.warning('Create failed: %s - %s', model_cls, e)
             try:
                 raise do_sync.retry(exc=e)
             except do_sync.MaxRetriesExceededError, e:
-                logger.error('Create failed permanently: %s', unicode(new_obj))
-        return
+                try:
+                    logger.error('Create failed permanently: %s', unicode(new_obj))
+                except Exception, _:
+                    logger.error('Create failed permanently: %s', json_str)
+        else:
+            logger.info('CREATED - %s', unicode(new_obj))
     if operation == 'update':
         try:
             with atomic():
@@ -72,12 +85,22 @@ def do_sync(operation, app_label, model_name, json_str):
                     updated_obj.pk = local_obj.pk
                 # This shouldn't affect M2M relationships
                 updated_obj.save(force_update=True)
-        except DatabaseError, e:
-            logger.warning('Update failed: %s - %s', unicode(updated_obj), e)
+        except (models.ObjectDoesNotExist,
+                DatabaseError,
+                DeserializationError), e:
+            try:
+                logger.warning('Update failed: %s - %s', unicode(updated_obj), e)
+            except Exception, _:
+                logger.warning('Update failed: %s - %s', model_cls)
             try:
                 raise do_sync.retry(exc=e)
             except do_sync.MaxRetriesExceededError, e:
-                logger.error('Update failed permanently: %s', unicode(updated_obj))
+                try:
+                    logger.error('Update failed permanently: %s', unicode(updated_obj))
+                except Exception, _:
+                    logger.error('Update failed permanently: %s', json_str)
+        else:
+            logger.info('UPDATED - %s', unicode(updated_obj))
 
 
 

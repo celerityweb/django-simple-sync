@@ -148,7 +148,7 @@ class ModelSyncer(object):
 
     def to_json(self, obj):
         return serialize('json', [obj], use_natural_keys=True)
-
+        
     def from_json(self, json_obj):
         logger.debug('json_obj: %s', json_obj)
         deserialized_obj = deserialize('json', json_obj).next()
