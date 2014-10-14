@@ -9,11 +9,16 @@ import json
 
 from celery import current_app
 from django.core.serializers.base import DeserializationError
-from django.db import models, Error as DatabaseError, connection
+from django.db import models
+try:
+    from django.db import Error as DatabaseError
+except ImportError:
+    # Django < 1.6
+    from django.db import DatabaseError
 try:
     from django.db.transaction import atomic
 except ImportError:
-    # Django <= 1.6
+    # Django < 1.6
     from django.db.transaction import commit_on_success as atomic #noqa
 from django.conf import settings
 
