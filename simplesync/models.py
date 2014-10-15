@@ -2,6 +2,7 @@
 from __future__ import absolute_import
 
 import logging
+import functools
 
 logger = logging.getLogger(__name__)
 
@@ -12,6 +13,14 @@ from django.db import models
 from django.db.models import signals
 from django.core.serializers import serialize, deserialize
 from django.core.serializers.json import DateTimeAwareJSONEncoder
+
+def fail_silently(fn):
+    @functools.wraps(fn)
+    def __wrapper_(*args, **kwargs):
+        try:
+            fn(*args, **kwargs)
+        except Exception, e:
+            logger.exception('Failure in signal handler')
 
 class ModelSyncer(object):
 
@@ -24,6 +33,7 @@ class ModelSyncer(object):
         else:
             return model_cls._meta.model_name
 
+    @fail_silently
     def post_save_handler(self, sender=None, instance=None, created=None,
                           raw=None, using=None, update_fields=None, **kwargs):
         from . import tasks
@@ -58,6 +68,7 @@ class ModelSyncer(object):
                         self.get_model_name(sender), instance.pk, result.id)
             return
 
+    @fail_silently
     def post_delete_handler(self, sender=None, instance=None, using=None,
                             **kwargs):
         from . import tasks
@@ -79,6 +90,7 @@ class ModelSyncer(object):
         logger.info('DELETE - %s %s - queued as %s',
                     self.get_model_name(sender), json_body, result.id)
 
+    @fail_silently
     def m2m_changed_handler(self, sender=None, instance=None, action=None,
                             reverse=None, model=None, pk_set=None,
                             using=None, **kwargs):
@@ -127,7 +139,7 @@ class ModelSyncer(object):
             if hasattr(type(instance), 'natural_key') and \
                     hasattr(type(instance)._default_manager,
                             'get_by_natural_key'):
-                json_body[self.get_model_name(type(instance))] = instance.natural_key()
+                json_bdy = {'pk': instance.natural_key()}
             else:
                 attname = 'pk'
                 value = instance.pk
@@ -160,6 +172,7 @@ class ModelSyncer(object):
         logger.debug('json_obj: %s', json_obj)
         deserialized_obj = deserialize('json', json_obj).next()
         return deserialized_obj.object, deserialized_obj.m2m_data
+
 
 class SyncerRegistry(object):
     def __init__(self):

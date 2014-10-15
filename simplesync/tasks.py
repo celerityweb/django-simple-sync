@@ -33,6 +33,9 @@ def do_sync(operation, app_label, model_name, json_str):
             # there may be natural keys in here
             for key, value in json_obj.items():
                 if hasattr(value, '__iter__'):
+                    if field_name == 'pk':
+                        json_obj[key] = model_cls._default_manager.get_by_natural_key(*value).pk
+                        continue
                     field_name = key[:-3] if key.endswith('_id') else key
                     try:
                         field = model_cls._meta.get_field(field_name)
