@@ -21,6 +21,7 @@ def fail_silently(fn):
             fn(*args, **kwargs)
         except Exception, e:
             logger.exception('Failure in signal handler')
+    return __wrapper_
 
 class ModelSyncer(object):
 
