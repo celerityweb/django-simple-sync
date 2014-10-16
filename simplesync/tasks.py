@@ -22,29 +22,26 @@ except ImportError:
     from django.db.transaction import commit_on_success as atomic #noqa
 from django.conf import settings
 
-NULLIFY_PK = getattr(settings, 'SIMPLESYNC_NULLIFY_PK', False)
-
 @current_app.task(name='simplesync-task', ignore_result=True, max_retries=5)
-def do_sync(operation, app_label, model_name, json_str):
+def do_sync(operation, app_label, model_name, original_key, json_str):
     model_cls = models.get_model(app_label, model_name)
+    from .models import ModelSyncer
+    syncer = ModelSyncer(model_cls)
     if operation == 'delete':
         json_obj = json.loads(json_str)
         with atomic():
             # there may be natural keys in here
             for key, value in json_obj.items():
                 if hasattr(value, '__iter__'):
+                    field_name = key[:-3] if key.endswith('_id') else key
                     if field_name == 'pk':
                         json_obj[key] = model_cls._default_manager.get_by_natural_key(*value).pk
                         continue
-                    field_name = key[:-3] if key.endswith('_id') else key
                     try:
                         field = model_cls._meta.get_field(field_name)
                     except models.FieldDoesNotExist:
                         continue
-                    if not field.rel:
-                        continue
-                    if not hasattr(field.rel.to._default_manager,
-                                   'get_by_natural_key'):
+                    if not field.rel or not syncer.uses_natural_key(field.rel.to):
                         continue
                     obj = field.rel.to._default_manager.get_by_natural_key(*value)
                     json_obj[key] = obj.pk
@@ -53,13 +50,12 @@ def do_sync(operation, app_label, model_name, json_str):
             except TypeError:
                 logger.exception('%s', json_obj)
         logger.info('DELETED - %s - %s', model_cls, json_obj)
-    from .models import ModelSyncer
-    syncer = ModelSyncer(model_cls)
     if operation == 'create':
         try:
             with atomic():
                 new_obj, m2m_data = syncer.from_json(json_str)
-                if NULLIFY_PK:
+                # If we're relying on natural keys, drop the pk value
+                if syncer.uses_natural_key(new_obj):
                     new_obj.pk = None
                 new_obj.save(force_insert=True)
                 # for attr, value_list in m2m_data.items():
@@ -85,13 +81,11 @@ def do_sync(operation, app_label, model_name, json_str):
         try:
             with atomic():
                 updated_obj, m2m_data = syncer.from_json(json_str)
-                # If there's a natural key, get the object in the database
-                # matching this natural key and use its local pk value
-                if hasattr(updated_obj, 'natural_key') and callable(updated_obj.natural_key) \
-                        and hasattr(type(updated_obj)._default_manager, 'get_by_natural_key'):
-                    local_obj = type(updated_obj)._default_manager.get_by_natural_key(*updated_obj.natural_key())
-                    updated_obj.pk = local_obj.pk
-                # This shouldn't affect M2M relationships
+                if syncer.uses_natural_key(updated_obj):
+                    original_obj = model_cls._default_manager.get_by_natural_key(*original_key)
+                else:
+                    original_obj = model_cls._default_manager.get(pk=original_key)
+                updated_obj.pk = original_obj.pk
                 updated_obj.save(force_update=True)
         except (models.ObjectDoesNotExist,
                 DatabaseError,
@@ -109,6 +103,3 @@ def do_sync(operation, app_label, model_name, json_str):
                     logger.error('Update failed permanently: %s', json_str)
         else:
             logger.info('UPDATED - %s', unicode(updated_obj))
-
-
-
