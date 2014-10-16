@@ -25,6 +25,7 @@ from django.conf import settings
 @current_app.task(name='simplesync-task', ignore_result=True, max_retries=5)
 def do_sync(operation, app_label, model_name, original_key, json_str):
     model_cls = models.get_model(app_label, model_name)
+    logger.info('%s - %s.%s - %s', do_sync.request.id, app_label, model_name, original_key)
     from .models import ModelSyncer
     syncer = ModelSyncer(model_cls)
     if operation == 'delete':
@@ -56,6 +57,8 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                 new_obj, m2m_data = syncer.from_json(json_str)
                 # If we're relying on natural keys, drop the pk value
                 if syncer.uses_natural_key(new_obj):
+                    logger.info('%s - %s.%s - before create, nulling PK',
+                                do_sync.request.id, app_label, model_name)
                     new_obj.pk = None
                 new_obj.save(force_insert=True)
                 # for attr, value_list in m2m_data.items():
@@ -85,6 +88,8 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                     original_obj = model_cls._default_manager.get_by_natural_key(*original_key)
                 else:
                     original_obj = model_cls._default_manager.get(pk=original_key)
+                logger.info('%s - %s.%s - before update, using PK %d',
+                            do_sync.request.id, app_label, model_name, original_obj.pk)
                 updated_obj.pk = original_obj.pk
                 updated_obj.save(force_update=True)
         except (models.ObjectDoesNotExist,

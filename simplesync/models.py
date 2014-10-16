@@ -84,7 +84,8 @@ class ModelSyncer(object):
                                          None,  # original_key
                                          self.to_json(instance))
             logger.info('CREATE - %s %s - queued as %s',
-                        self.get_model_name(sender), instance.pk, result.id)
+                        self.get_model_name(sender), self.pk_or_nk(instance),
+                        result.id)
             return
         else:
             if not self.can_update(instance):
@@ -98,7 +99,8 @@ class ModelSyncer(object):
                                          instance._state.original_key,
                                          self.to_json(instance))
             logger.info('UPDATE - %s %s - queued as %s',
-                        self.get_model_name(sender), instance.pk, result.id)
+                        self.get_model_name(sender), self.pk_or_nk(instance),
+                        result.id)
             return
 
     @fail_silently
@@ -144,7 +146,8 @@ class ModelSyncer(object):
                                              None,  # original_key
                                              syncer.to_json(obj))
                 logger.info('CREATE - %s %s - queued as %s',
-                            self.get_model_name(ThroughClass), instance.pk, result.id)
+                            self.get_model_name(ThroughClass), self.pk_or_nk(instance),
+                            result.id)
             return
 
         if action == 'post_remove' and \
