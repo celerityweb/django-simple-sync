@@ -96,7 +96,8 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                     logger.error('%s - Create failed permanently: %s', do_sync.request.id,
                                  json_str)
         else:
-            logger.info('%s - CREATED - %s', do_sync.request.id, unicode(new_obj))
+            logger.info('%s - CREATED - %s %s (%s)', do_sync.request.id, model_cls,
+                        unicode(new_obj), new_obj.pk)
     if operation == 'update':
         updated_obj = None
         try:
@@ -125,4 +126,5 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                 else:
                     logger.error('%s - Update failed permanently: %s', do_sync.request.id, json_str)
         else:
-            logger.info('%s - UPDATED - %s', do_sync.request.id, unicode(updated_obj))
+            logger.info('%s - UPDATED - %s %s (%s)', do_sync.request.id, model_cls,
+                        unicode(updated_obj), updated_obj.pk)
