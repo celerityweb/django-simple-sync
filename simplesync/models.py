@@ -81,11 +81,13 @@ class ModelSyncer(object):
                              'authorized by can_create',
                              self.get_model_name(sender), instance.pk)
                 return
+            # Re-GET the instance to ensure that all FK's are realized
+            requeried_obj = self.model._default_manager.get(pk=instance.pk)
             result = tasks.do_sync.delay('create',
                                          sender._meta.app_label,
                                          self.get_model_name(sender),
                                          None,  # original_key
-                                         self.to_json(instance))
+                                         self.to_json(requeried_obj))
             logger.info('CREATE - %s %s - queued as %s',
                         self.get_model_name(sender), self.pk_or_nk(instance),
                         result.id)
@@ -96,11 +98,13 @@ class ModelSyncer(object):
                              'authorized by can_update',
                              self.get_model_name(sender), instance.pk)
                 return
+            # Re-GET the instance to ensure that all FK's are realized
+            requeried_obj = self.model._default_manager.get(pk=instance.pk)
             result = tasks.do_sync.delay('update',
                                          sender._meta.app_label,
                                          self.get_model_name(sender),
                                          instance._state.original_key,
-                                         self.to_json(instance))
+                                         self.to_json(requeried_obj.pk))
             logger.info('UPDATE - %s %s - queued as %s',
                         self.get_model_name(sender), self.pk_or_nk(instance),
                         result.id)
