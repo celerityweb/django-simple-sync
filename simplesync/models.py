@@ -9,9 +9,12 @@ logger = logging.getLogger(__name__)
 import json
 
 import django
+from django.conf import settings
+from django.db import models
 from django.db.models import signals
 from django.core.serializers import serialize, deserialize
 from django.core.serializers.json import DateTimeAwareJSONEncoder
+from django.utils import timezone
 
 
 def fail_silently(fn):
@@ -203,9 +206,17 @@ class ModelSyncer(object):
     def to_json(self, obj):
         return serialize('json', [obj], use_natural_keys=True)
 
+    def cluestick_datetimes(self, obj):
+        if settings.USE_TZ and getattr(settings, 'SIMPLESYNC_MAKE_DT_AWARE', True):
+            for field in [f for f in obj._meta.fields if isinstance(f, models.DateTimeField)]:
+                dt = getattr(obj, field.attname)
+                if dt and timezone.is_naive(dt):
+                    setattr(obj, field.attname, dt.replace(tzinfo=timezone.get_current_timezone()))
+
     def from_json(self, json_obj):
         logger.debug('json_obj: %s', json_obj)
         deserialized_obj = deserialize('json', json_obj).next()
+        self.cluestick_datetimes(deserialized_obj)
         return deserialized_obj.object, deserialized_obj.m2m_data
 
 
