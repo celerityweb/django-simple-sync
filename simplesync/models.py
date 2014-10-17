@@ -104,7 +104,7 @@ class ModelSyncer(object):
                                          sender._meta.app_label,
                                          self.get_model_name(sender),
                                          instance._state.original_key,
-                                         self.to_json(requeried_obj.pk))
+                                         self.to_json(requeried_obj))
             logger.info('UPDATE - %s %s - queued as %s',
                         self.get_model_name(sender), self.pk_or_nk(instance),
                         result.id)
