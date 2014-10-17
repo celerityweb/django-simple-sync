@@ -64,6 +64,7 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                 logger.exception('%s - %s', do_sync.request.id, json_obj)
         logger.info('%s - DELETED - %s - %s', do_sync.request.id, model_cls, json_obj)
     if operation == 'create':
+        new_obj = None
         try:
             with atomic():
                 new_obj, m2m_data = syncer.from_json(json_str)
@@ -79,24 +80,25 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
         except (models.ObjectDoesNotExist,
                 DatabaseError,
                 DeserializationError), e:
-            try:
+            if new_obj:
                 logger.warning('%s - Create failed: %s - %s', do_sync.request.id,
                                unicode(new_obj), e)
-            except Exception, _:
+            else:
                 logger.warning('%s - Create failed: %s - %s - %s', do_sync.request.id,
                                model_cls, json_str, e)
             try:
                 raise do_sync.retry(exc=e)
             except do_sync.MaxRetriesExceededError, e:
-                try:
+                if new_obj:
                     logger.error('%s - Create failed permanently: %s', do_sync.request.id,
                                  unicode(new_obj))
-                except Exception, _:
+                else:
                     logger.error('%s - Create failed permanently: %s', do_sync.request.id,
                                  json_str)
         else:
             logger.info('%s - CREATED - %s', do_sync.request.id, unicode(new_obj))
     if operation == 'update':
+        updated_obj = None
         try:
             with atomic():
                 updated_obj, m2m_data = syncer.from_json(json_str)
@@ -111,16 +113,16 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
         except (models.ObjectDoesNotExist,
                 DatabaseError,
                 DeserializationError), e:
-            try:
+            if updated_obj:
                 logger.warning('%s - Update failed: %s - %s', do_sync.request.id, unicode(updated_obj), e)
-            except Exception, _:
+            else:
                 logger.warning('%s - Update failed: %s - %s - %s', do_sync.request.id, model_cls, json_str, e)
             try:
                 raise do_sync.retry(exc=e)
             except do_sync.MaxRetriesExceededError, e:
-                try:
+                if updated_obj:
                     logger.error('%s - Update failed permanently: %s', do_sync.request.id, unicode(updated_obj))
-                except Exception, _:
+                else:
                     logger.error('%s - Update failed permanently: %s', do_sync.request.id, json_str)
         else:
             logger.info('%s - UPDATED - %s', do_sync.request.id, unicode(updated_obj))
