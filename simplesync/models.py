@@ -216,7 +216,7 @@ class ModelSyncer(object):
     def from_json(self, json_obj):
         logger.debug('json_obj: %s', json_obj)
         deserialized_obj = deserialize('json', json_obj).next()
-        self.cluestick_datetimes(deserialized_obj)
+        self.cluestick_datetimes(deserialized_obj.object)
         return deserialized_obj.object, deserialized_obj.m2m_data
 
 
