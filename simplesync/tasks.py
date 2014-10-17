@@ -36,7 +36,13 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                 if hasattr(value, '__iter__'):
                     field_name = key[:-3] if key.endswith('_id') else key
                     if field_name == 'pk':
-                        json_obj[key] = model_cls._default_manager.get_by_natural_key(*value).pk
+                        try:
+                            json_obj[key] = model_cls._default_manager.get_by_natural_key(*value).pk
+                        except model_cls.DoesNotExist:
+                            logger.warning('%s - DELETE - Could not find %s '
+                                           'instance with natural key %s - aborting.',
+                                           do_sync.request.id, model_cls, value)
+                            return
                         continue
                     try:
                         field = model_cls._meta.get_field(field_name)
@@ -44,13 +50,19 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                         continue
                     if not field.rel or not syncer.uses_natural_key(field.rel.to):
                         continue
-                    obj = field.rel.to._default_manager.get_by_natural_key(*value)
+                    try:
+                        obj = field.rel.to._default_manager.get_by_natural_key(*value)
+                    except field.rel.to.DoesNotExist:
+                        logger.warning('%s - DELETE - Could not find related %s '
+                                       'instance with natural key %s - aborting.',
+                                       do_sync.request.id, field.rel.to, value)
+                        return
                     json_obj[key] = obj.pk
             try:
                 model_cls.objects.filter(**json_obj).delete()
             except TypeError:
-                logger.exception('%s', json_obj)
-        logger.info('DELETED - %s - %s', model_cls, json_obj)
+                logger.exception('%s - %s', do_sync.request.id, json_obj)
+        logger.info('%s - DELETED - %s - %s', do_sync.request.id, model_cls, json_obj)
     if operation == 'create':
         try:
             with atomic():
@@ -68,18 +80,22 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                 DatabaseError,
                 DeserializationError), e:
             try:
-                logger.warning('Create failed: %s - %s', unicode(new_obj), e)
+                logger.warning('%s - Create failed: %s - %s', do_sync.request.id,
+                               unicode(new_obj), e)
             except Exception, _:
-                logger.warning('Create failed: %s - %s - %s', model_cls, json_str, e)
+                logger.warning('%s - Create failed: %s - %s - %s', do_sync.request.id,
+                               model_cls, json_str, e)
             try:
                 raise do_sync.retry(exc=e)
             except do_sync.MaxRetriesExceededError, e:
                 try:
-                    logger.error('Create failed permanently: %s', unicode(new_obj))
+                    logger.error('%s - Create failed permanently: %s', do_sync.request.id,
+                                 unicode(new_obj))
                 except Exception, _:
-                    logger.error('Create failed permanently: %s', json_str)
+                    logger.error('%s - Create failed permanently: %s', do_sync.request.id,
+                                 json_str)
         else:
-            logger.info('CREATED - %s', unicode(new_obj))
+            logger.info('%s - CREATED - %s', do_sync.request.id, unicode(new_obj))
     if operation == 'update':
         try:
             with atomic():
@@ -96,15 +112,15 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                 DatabaseError,
                 DeserializationError), e:
             try:
-                logger.warning('Update failed: %s - %s', unicode(updated_obj), e)
+                logger.warning('%s - Update failed: %s - %s', do_sync.request.id, unicode(updated_obj), e)
             except Exception, _:
-                logger.warning('Update failed: %s - %s - %s', model_cls, json_str, e)
+                logger.warning('%s - Update failed: %s - %s - %s', do_sync.request.id, model_cls, json_str, e)
             try:
                 raise do_sync.retry(exc=e)
             except do_sync.MaxRetriesExceededError, e:
                 try:
-                    logger.error('Update failed permanently: %s', unicode(updated_obj))
+                    logger.error('%s - Update failed permanently: %s', do_sync.request.id, unicode(updated_obj))
                 except Exception, _:
-                    logger.error('Update failed permanently: %s', json_str)
+                    logger.error('%s - Update failed permanently: %s', do_sync.request.id, json_str)
         else:
-            logger.info('UPDATED - %s', unicode(updated_obj))
+            logger.info('%s - UPDATED - %s', do_sync.request.id, unicode(updated_obj))
