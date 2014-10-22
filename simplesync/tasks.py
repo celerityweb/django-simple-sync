@@ -22,6 +22,8 @@ except ImportError:
     from django.db.transaction import commit_on_success as atomic #noqa
 from django.conf import settings
 
+NULLIFY_ALL_PKS = getattr(settings, 'SIMPLESYNC_NULLIFY_ALL_PKS', False)
+
 @current_app.task(name='simplesync-task', ignore_result=True, max_retries=5)
 def do_sync(operation, app_label, model_name, original_key, json_str):
     model_cls = models.get_model(app_label, model_name)
@@ -69,7 +71,7 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
             with atomic():
                 new_obj, m2m_data = syncer.from_json(json_str)
                 # If we're relying on natural keys, drop the pk value
-                if syncer.uses_natural_key(new_obj):
+                if syncer.uses_natural_key(new_obj) or NULLIFY_ALL_PKS:
                     logger.info('%s - %s.%s - before create, nulling PK',
                                 do_sync.request.id, app_label, model_name)
                     new_obj.pk = None
