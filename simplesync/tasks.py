@@ -23,6 +23,7 @@ except ImportError:
 from django.conf import settings
 
 NULLIFY_ALL_PKS = getattr(settings, 'SIMPLESYNC_NULLIFY_ALL_PKS', False)
+LEGACY_PK_FIELD = getattr(settings, 'SIMPLESYNC_LEGACY_PK_FIELD', None)
 
 @current_app.task(name='simplesync-task', ignore_result=True, max_retries=5)
 def do_sync(operation, app_label, model_name, original_key, json_str):
@@ -74,6 +75,8 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                 if syncer.uses_natural_key(new_obj) or NULLIFY_ALL_PKS:
                     logger.info('%s - %s.%s - before create, nulling PK',
                                 do_sync.request.id, app_label, model_name)
+                    if LEGACY_PK_FIELD:
+                        setattr(new_obj, LEGACY_PK_FIELD, new_obj.pk)
                     new_obj.pk = None
                 new_obj.save(force_insert=True)
                 # for attr, value_list in m2m_data.items():
