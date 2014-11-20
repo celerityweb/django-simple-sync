@@ -75,7 +75,7 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
                 if syncer.uses_natural_key(new_obj) or NULLIFY_ALL_PKS:
                     logger.info('%s - %s.%s - before create, nulling PK',
                                 do_sync.request.id, app_label, model_name)
-                    if LEGACY_PK_FIELD:
+                    if LEGACY_PK_FIELD and hasattr(new_obj, LEGACY_PK_FIELD):
                         setattr(new_obj, LEGACY_PK_FIELD, new_obj.pk)
                     new_obj.pk = None
                 new_obj.save(force_insert=True)
