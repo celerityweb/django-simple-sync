@@ -6,6 +6,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 import json
+import importlib
 
 from celery import current_app
 from django.core.serializers.base import DeserializationError
@@ -24,13 +25,16 @@ from django.conf import settings
 
 NULLIFY_ALL_PKS = getattr(settings, 'SIMPLESYNC_NULLIFY_ALL_PKS', False)
 LEGACY_PK_FIELD = getattr(settings, 'SIMPLESYNC_LEGACY_PK_FIELD', None)
+SYNCER_CLS = getattr(settings, 'SIMPLESYNC_SYNCER_CLS', 'simplesync.models.ModelSyncer')
 
 @current_app.task(name='simplesync-task', ignore_result=True, max_retries=5)
 def do_sync(operation, app_label, model_name, original_key, json_str):
     model_cls = models.get_model(app_label, model_name)
     logger.info('%s - %s.%s - %s', do_sync.request.id, app_label, model_name, original_key)
-    from .models import __registry__
-    syncer = __registry__.registered[model_cls](model_cls)
+    mod_name, syncer_cls_name = SYNCER_CLS.rsplit('.', 1)
+    mod = importlib.import_module(mod_name)
+    syncer_cls = getattr(mod, syncer_cls_name)
+    syncer = syncer_cls_name(model_cls)
     if operation == 'delete':
         json_obj = json.loads(json_str)
         with atomic():
