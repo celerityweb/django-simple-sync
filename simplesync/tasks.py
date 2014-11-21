@@ -34,7 +34,7 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
     mod_name, syncer_cls_name = SYNCER_CLS.rsplit('.', 1)
     mod = importlib.import_module(mod_name)
     syncer_cls = getattr(mod, syncer_cls_name)
-    syncer = syncer_cls_name(model_cls)
+    syncer = syncer_cls(model_cls)
     if operation == 'delete':
         json_obj = json.loads(json_str)
         with atomic():
