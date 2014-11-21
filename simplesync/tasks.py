@@ -30,7 +30,7 @@ def do_sync(operation, app_label, model_name, original_key, json_str):
     model_cls = models.get_model(app_label, model_name)
     logger.info('%s - %s.%s - %s', do_sync.request.id, app_label, model_name, original_key)
     from .models import __registry__
-    syncer = __registry__[model_cls](model_cls)
+    syncer = __registry__.registry[model_cls](model_cls)
     if operation == 'delete':
         json_obj = json.loads(json_str)
         with atomic():
